@@ -61,12 +61,26 @@ def assemble_tokens(tokens):
     return out
 
 
+def build_context(tokens, idx, window=3):
+    """해당 토큰 주변으로 짧은 문맥 스니펫 생성 (정답 위치는 ____ 로 표시)"""
+    start = max(0, idx - window)
+    end = min(len(tokens), idx + window + 1)
+    snippet_tokens = []
+    for j in range(start, end):
+        if j == idx:
+            snippet_tokens.append("____")
+        else:
+            snippet_tokens.append(tokens[j])
+    return assemble_tokens(snippet_tokens)
+
+
 # ---------- 문제 생성용 함수 ----------
 def generate_questions_from_docx(file_like, pos_choice, blank_ratio_fraction):
     src = Document(file_like)
 
     question_paragraphs = []  # 빈칸이 들어간 문단 문자열 리스트
-    answer_map = {}  # {번호: 정답}
+    answer_map = {}           # {번호: 정답}
+    context_map = {}          # {번호: 짧은 문맥 스니펫}
     next_blank_num = 1
 
     for para in src.paragraphs:
@@ -113,12 +127,14 @@ def generate_questions_from_docx(file_like, pos_choice, blank_ratio_fraction):
             underline = "_" * max(3, len(original_word))
             out_tokens[idx] = f"({next_blank_num}){underline}"
             answer_map[next_blank_num] = original_word
+            # 이 번호에 대한 짧은 문맥 저장
+            context_map[next_blank_num] = build_context(tokens, idx)
             next_blank_num += 1
 
         para_text = assemble_tokens(out_tokens)
         question_paragraphs.append(para_text)
 
-    return question_paragraphs, answer_map
+    return question_paragraphs, answer_map, context_map
 
 
 # ---------- 채점 함수 ----------
@@ -159,7 +175,9 @@ st.set_page_config(page_title="Blank Test Web Quiz", layout="wide")
 st.title("📘 Blank Test Web Quiz")
 st.markdown(
     "업로드한 Word(.docx)에서 특정 품사만 선택하여 랜덤으로 빈칸을 생성하고, "
-    "웹페이지에서 **문제지 포맷을 그대로 보면서 오른쪽에 답안을 입력**하고 자동 채점할 수 있습니다."
+    "웹페이지에서 **문제지 포맷을 그대로 보면서 오른쪽에 번호별 답안을 입력**하고 자동 채점할 수 있습니다.\n\n"
+    "오른쪽 답안지에는 각 번호에 해당하는 **짧은 지문 문맥**도 함께 보여 주어, "
+    "스크롤을 내려도 어떤 빈칸인지 바로 확인할 수 있습니다."
 )
 
 # 상단 정보란 (반, 이름 등)
@@ -188,11 +206,12 @@ if uploaded_file is not None:
     if st.button("📄 문제 만들기"):
         try:
             uploaded_file.seek(0)
-            questions, answer_map = generate_questions_from_docx(
+            questions, answer_map, context_map = generate_questions_from_docx(
                 uploaded_file, pos_choice, blank_pct / 100.0
             )
             st.session_state["questions"] = questions
             st.session_state["answer_map"] = answer_map
+            st.session_state["context_map"] = context_map
             st.success("문제가 생성되었습니다. 왼쪽 문제지를 보면서 오른쪽에 답을 입력하세요!")
         except Exception as e:
             st.error("문제 생성 중 오류가 발생했습니다.")
@@ -202,10 +221,15 @@ else:
 
 st.markdown("---")
 
-# 생성된 문제가 있으면: 좌측 문제지, 우측 답안지
-if "questions" in st.session_state and "answer_map" in st.session_state:
+# 생성된 문제가 있으면: 좌측 문제지, 우측 답안지 + 문맥 스니펫
+if (
+    "questions" in st.session_state
+    and "answer_map" in st.session_state
+    and "context_map" in st.session_state
+):
     questions = st.session_state["questions"]
     answer_map = st.session_state["answer_map"]
+    context_map = st.session_state["context_map"]
 
     if len(answer_map) == 0:
         st.warning("생성된 빈칸이 없습니다. 빈칸 비율을 올리거나 다른 품사/지문을 사용해 보세요.")
@@ -219,12 +243,14 @@ if "questions" in st.session_state and "answer_map" in st.session_state:
                     st.write("")  # 빈 줄
                 else:
                     st.markdown(para)
-            # 필요하면 줄 구분선 추가
-            # st.markdown("---")
 
         with col_a:
             st.subheader("✏️ 답안지 (번호에 맞게 입력)")
+
             for num in sorted(answer_map.keys()):
+                snippet = context_map.get(num, "")
+                if snippet:
+                    st.caption(f"{num}번 문맥: {snippet}")
                 st.text_input(
                     label=f"{num}번",
                     key=f"answer_{num}",
