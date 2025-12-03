@@ -159,7 +159,7 @@ st.set_page_config(page_title="Blank Test Web Quiz", layout="wide")
 st.title("📘 Blank Test Web Quiz")
 st.markdown(
     "업로드한 Word(.docx)에서 특정 품사만 선택하여 랜덤으로 빈칸을 생성하고, "
-    "웹페이지에서 **문단 전체를 그대로 보여 주고, 그 바로 아래에서 빈칸에 대한 답을 입력**하고 자동 채점할 수 있습니다."
+    "웹페이지에서 **문제지 포맷을 그대로 보면서 오른쪽에 답안을 입력**하고 자동 채점할 수 있습니다."
 )
 
 # 상단 정보란 (반, 이름 등)
@@ -193,7 +193,7 @@ if uploaded_file is not None:
             )
             st.session_state["questions"] = questions
             st.session_state["answer_map"] = answer_map
-            st.success("문제가 생성되었습니다. 아래 문제지에서 바로 풀어보세요!")
+            st.success("문제가 생성되었습니다. 왼쪽 문제지를 보면서 오른쪽에 답을 입력하세요!")
         except Exception as e:
             st.error("문제 생성 중 오류가 발생했습니다.")
             st.exception(e)
@@ -202,7 +202,7 @@ else:
 
 st.markdown("---")
 
-# 생성된 문제가 있으면: 문단 전체 + 문단 바로 아래에 해당 빈칸 입력
+# 생성된 문제가 있으면: 좌측 문제지, 우측 답안지
 if "questions" in st.session_state and "answer_map" in st.session_state:
     questions = st.session_state["questions"]
     answer_map = st.session_state["answer_map"]
@@ -210,54 +210,46 @@ if "questions" in st.session_state and "answer_map" in st.session_state:
     if len(answer_map) == 0:
         st.warning("생성된 빈칸이 없습니다. 빈칸 비율을 올리거나 다른 품사/지문을 사용해 보세요.")
     else:
-        st.subheader("📝 문제지")
+        col_q, col_a = st.columns([2, 1])
 
-        # 각 문단을 순서대로 출력
-        for para in questions:
-            if para.strip() == "":
-                st.write("")  # 빈 줄
-                continue
-
-            # 1) 문단 전체를 먼저 그대로 출력
-            st.markdown(para)
-
-            # 2) 이 문단에 포함된 빈칸 번호들 찾기
-            blank_nums_in_para = re.findall(r"\((\d+)\)_+", para)
-            blank_nums_in_para = [int(x) for x in blank_nums_in_para]
-
-            # 3) 문단 바로 아래에, 해당 번호들의 입력칸 생성
-            if blank_nums_in_para:
-                cols = st.columns(len(blank_nums_in_para))
-                for i, num in enumerate(sorted(blank_nums_in_para)):
-                    with cols[i]:
-                        st.text_input(
-                            label=f"{num}번 (위 문단의 ({num}) 빈칸)",
-                            key=f"answer_{num}",
-                            placeholder="정답 입력",
-                        )
-
-            st.markdown("---")
-
-        # 전체 채점 버튼
-        if st.button("✅ 채점하기"):
-            correct_count, total, results = grade_answers(answer_map)
-            score_pct = (correct_count / total) * 100 if total > 0 else 0.0
-
-            st.subheader("📊 채점 결과")
-            st.write(f"총 {total}문항 중 **{correct_count}개** 정답입니다.")
-            st.write(f"점수: **{score_pct:.1f}점 / 100점**")
-
-            # 문항별 피드백
-            for r in results:
-                num = r["num"]
-                correct = r["correct"]
-                user_ans = r["user"]
-                if r["is_correct"]:
-                    st.success(f"{num}번: 정답! (입력: {user_ans})")
+        with col_q:
+            st.subheader("📝 문제지")
+            for para in questions:
+                if para.strip() == "":
+                    st.write("")  # 빈 줄
                 else:
-                    if user_ans.strip() == "":
-                        st.error(f"{num}번: 무응답. 정답은 **{correct}** 입니다.")
+                    st.markdown(para)
+            # 필요하면 줄 구분선 추가
+            # st.markdown("---")
+
+        with col_a:
+            st.subheader("✏️ 답안지 (번호에 맞게 입력)")
+            for num in sorted(answer_map.keys()):
+                st.text_input(
+                    label=f"{num}번",
+                    key=f"answer_{num}",
+                    placeholder=f"{num}번 정답",
+                )
+
+            if st.button("✅ 채점하기"):
+                correct_count, total, results = grade_answers(answer_map)
+                score_pct = (correct_count / total) * 100 if total > 0 else 0.0
+
+                st.markdown("---")
+                st.subheader("📊 채점 결과")
+                st.write(f"총 {total}문항 중 **{correct_count}개** 정답입니다.")
+                st.write(f"점수: **{score_pct:.1f}점 / 100점**")
+
+                for r in results:
+                    num = r["num"]
+                    correct = r["correct"]
+                    user_ans = r["user"]
+                    if r["is_correct"]:
+                        st.success(f"{num}번: 정답! (입력: {user_ans})")
                     else:
-                        st.error(
-                            f"{num}번: 오답. 입력: `{user_ans}`, 정답: **{correct}**"
-                        )
+                        if user_ans.strip() == "":
+                            st.error(f"{num}번: 무응답. 정답은 **{correct}** 입니다.")
+                        else:
+                            st.error(
+                                f"{num}번: 오답. 입력: `{user_ans}`, 정답: **{correct}**"
+                            )
