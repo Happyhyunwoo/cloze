@@ -7,15 +7,26 @@ import re
 import os
 
 # ---------- NLTK data ----------
+# 1) 문장/단어 토크나이저: punkt + punkt_tab
 try:
-    nltk.data.find('tokenizers/punkt')
+    nltk.data.find("tokenizers/punkt")
 except LookupError:
-    nltk.download('punkt', quiet=True)
+    nltk.download("punkt", quiet=True)
 
 try:
-    nltk.data.find('taggers/averaged_perceptron_tagger')
+    nltk.data.find("tokenizers/punkt_tab")
 except LookupError:
-    nltk.download('averaged_perceptron_tagger', quiet=True)
+    nltk.download("punkt_tab", quiet=True)
+
+# 2) 품사 태거: 기존 이름 + 새로운 이름 모두 대비
+try:
+    nltk.data.find("taggers/averaged_perceptron_tagger")
+except LookupError:
+    try:
+        nltk.data.find("taggers/averaged_perceptron_tagger_eng")
+    except LookupError:
+        nltk.download("averaged_perceptron_tagger", quiet=True)
+        nltk.download("averaged_perceptron_tagger_eng", quiet=True)
 
 # ---------- POS 그룹 ----------
 POS_GROUPS = {
@@ -27,12 +38,15 @@ POS_GROUPS = {
 
 TOKEN_CANDIDATE_RE = re.compile(r"[A-Za-z0-9\uac00-\ud7a3]+")
 
+
 def is_candidate_token(tok):
     return bool(TOKEN_CANDIDATE_RE.search(tok))
+
 
 def tokenize_preserve_spacing(text):
     tokens = word_tokenize(text)
     return tokens
+
 
 def assemble_tokens(tokens):
     out = ""
@@ -46,12 +60,13 @@ def assemble_tokens(tokens):
             out += " " + t
     return out
 
+
 # ---------- 문제 생성용 함수 ----------
 def generate_questions_from_docx(file_like, pos_choice, blank_ratio_fraction):
     src = Document(file_like)
 
     question_paragraphs = []  # 빈칸이 들어간 문단 문자열 리스트
-    answer_map = {}           # {번호: 정답}
+    answer_map = {}  # {번호: 정답}
     next_blank_num = 1
 
     for para in src.paragraphs:
@@ -62,10 +77,11 @@ def generate_questions_from_docx(file_like, pos_choice, blank_ratio_fraction):
             continue
 
         tokens = tokenize_preserve_spacing(orig_text)
+
         try:
             tagged = pos_tag(tokens)
         except Exception:
-            tagged = [(t, 'NN') for t in tokens]
+            tagged = [(t, "NN") for t in tokens]
 
         candidate_indices = []
         for i, (tok, tg) in enumerate(tagged):
@@ -77,7 +93,9 @@ def generate_questions_from_docx(file_like, pos_choice, blank_ratio_fraction):
                         candidate_indices.append(i)
 
         if not candidate_indices:
-            candidate_indices = [i for i, (tok, tg) in enumerate(tagged) if is_candidate_token(tok)]
+            candidate_indices = [
+                i for i, (tok, tg) in enumerate(tagged) if is_candidate_token(tok)
+            ]
 
         n_candidates = len(candidate_indices)
         n_blanks = max(0, int(round(n_candidates * blank_ratio_fraction)))
@@ -91,7 +109,6 @@ def generate_questions_from_docx(file_like, pos_choice, blank_ratio_fraction):
         for idx in sorted(chosen):
             original_word = tokens[idx]
             underline = "_" * max(3, len(original_word))
-            # 화면에서도 보기 좋게 번호와 밑줄 표시
             out_tokens[idx] = f"({next_blank_num}){underline}"
             answer_map[next_blank_num] = original_word
             next_blank_num += 1
@@ -100,6 +117,7 @@ def generate_questions_from_docx(file_like, pos_choice, blank_ratio_fraction):
         question_paragraphs.append(para_text)
 
     return question_paragraphs, answer_map
+
 
 # ---------- 채점 함수 ----------
 def grade_answers(answer_map):
@@ -121,14 +139,17 @@ def grade_answers(answer_map):
         if is_correct:
             correct_count += 1
 
-        results.append({
-            "num": num,
-            "correct": correct,
-            "user": user_ans,
-            "is_correct": is_correct
-        })
+        results.append(
+            {
+                "num": num,
+                "correct": correct,
+                "user": user_ans,
+                "is_correct": is_correct,
+            }
+        )
 
     return correct_count, total, results
+
 
 # ---------------- Streamlit UI ----------------
 st.set_page_config(page_title="Blank Test Web Quiz", layout="wide")
@@ -154,11 +175,11 @@ blank_pct = st.slider("빈칸 비율 (%)", min_value=5, max_value=80, value=20, 
 
 uploaded_file = st.file_uploader("Word(.docx) 파일 업로드", type=["docx"])
 
-# 세션 상태 초기화 버튼 (원하면 사용)
+# 세션 상태 초기화 버튼
 if st.button("🧹 초기화(새로 시작하기)"):
     for key in list(st.session_state.keys()):
         del st.session_state[key]
-    st.experimental_rerun()
+    st.rerun()
 
 # 문제 생성 버튼
 if uploaded_file is not None:
@@ -168,7 +189,6 @@ if uploaded_file is not None:
             questions, answer_map = generate_questions_from_docx(
                 uploaded_file, pos_choice, blank_pct / 100.0
             )
-            # 세션에 저장 (재실행에도 유지하기 위해)
             st.session_state["questions"] = questions
             st.session_state["answer_map"] = answer_map
             st.success("문제가 생성되었습니다. 아래에서 바로 풀어보세요!")
@@ -190,26 +210,22 @@ if "questions" in st.session_state and "answer_map" in st.session_state:
     else:
         st.subheader("📝 문제지")
 
-        # 지문 출력
         for para in questions:
             if para.strip() == "":
-                st.write("")  # 빈 줄
+                st.write("")
             else:
-                # 학생이 보는 실제 지문
                 st.write(para)
 
         st.markdown("---")
         st.subheader("✏️ 답안 입력")
 
-        # 각 번호별 입력창
         for num in sorted(answer_map.keys()):
             st.text_input(
                 label=f"{num}번",
                 key=f"answer_{num}",
-                placeholder="정답을 입력하세요"
+                placeholder="정답을 입력하세요",
             )
 
-        # 채점 버튼
         if st.button("✅ 채점하기"):
             correct_count, total, results = grade_answers(answer_map)
             if total > 0:
@@ -223,7 +239,6 @@ if "questions" in st.session_state and "answer_map" in st.session_state:
             st.write(f"총 {total}문항 중 **{correct_count}개** 정답입니다.")
             st.write(f"점수: **{score_pct:.1f}점 / 100점**")
 
-            # 문항별 피드백
             for r in results:
                 num = r["num"]
                 correct = r["correct"]
