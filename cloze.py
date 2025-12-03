@@ -159,7 +159,7 @@ st.set_page_config(page_title="Blank Test Web Quiz", layout="wide")
 st.title("📘 Blank Test Web Quiz")
 st.markdown(
     "업로드한 Word(.docx)에서 특정 품사만 선택하여 랜덤으로 빈칸을 생성하고, "
-    "웹페이지에서 **문제지의 빈칸에 바로 답을 입력**하고 자동 채점할 수 있습니다."
+    "웹페이지에서 **문단 안 빈칸에 바로 답을 입력**하고 자동 채점할 수 있습니다."
 )
 
 # 상단 정보란 (반, 이름 등)
@@ -181,7 +181,7 @@ uploaded_file = st.file_uploader("Word(.docx) 파일 업로드", type=["docx"])
 if st.button("🧹 초기화(새로 시작하기)"):
     for key in list(st.session_state.keys()):
         del st.session_state[key]
-    st.experimental_rerun()
+    st.rerun()
 
 # 문제 생성 버튼
 if uploaded_file is not None:
@@ -202,7 +202,7 @@ else:
 
 st.markdown("---")
 
-# 생성된 문제가 있으면 화면에 출력 + 해당 문단 바로 아래에서 답 입력
+# 생성된 문제가 있으면 화면에 "문단 안 빈칸" 형태로 출력 + 입력
 if "questions" in st.session_state and "answer_map" in st.session_state:
     questions = st.session_state["questions"]
     answer_map = st.session_state["answer_map"]
@@ -210,45 +210,51 @@ if "questions" in st.session_state and "answer_map" in st.session_state:
     if len(answer_map) == 0:
         st.warning("생성된 빈칸이 없습니다. 빈칸 비율을 올리거나 다른 품사/지문을 사용해 보세요.")
     else:
-        st.subheader("📝 문제지 (빈칸 바로 아래에 답을 입력하세요)")
+        st.subheader("📝 문제지 (문단 안 빈칸에 바로 입력)")
 
-        # 각 문단을 순서대로 출력
+        blank_pattern = re.compile(r"(\(\d+\)_+)")  # 예: (3)____
+
         for para in questions:
             if para.strip() == "":
                 st.write("")  # 빈 줄
                 continue
 
-            # 문단 텍스트(빈칸 포함)를 먼저 보여줌
-            st.markdown(para)
+            # 문단을 '텍스트 / 빈칸 / 텍스트 / 빈칸 / ...' 형태의 조각으로 나눔
+            segments = re.split(blank_pattern, para)
 
-            # 이 문단에 포함된 빈칸 번호들 찾기
-            blank_nums_in_para = re.findall(r"\((\d+)\)_+", para)
-            blank_nums_in_para = [int(x) for x in blank_nums_in_para]
+            # 각 조각을 한 줄(row)에 여러 column으로 배치해서 "inline"처럼 보이게
+            cols = st.columns(len(segments))
 
-            # 문단 바로 아래에 해당 번호들의 답안 입력칸을 만들기
-            for num in sorted(blank_nums_in_para):
-                st.text_input(
-                    label=f"{num}번",
-                    key=f"answer_{num}",
-                    placeholder="정답을 입력하세요",
-                )
+            for i, seg in enumerate(segments):
+                if blank_pattern.fullmatch(seg or ""):
+                    # seg 는 "(번호)____" 형태
+                    num = int(re.findall(r"\d+", seg)[0])
+                    # label은 숨기고, placeholder에 번호만 간단히 표시
+                    cols[i].text_input(
+                        label=f"{num}번",
+                        key=f"answer_{num}",
+                        label_visibility="collapsed",
+                        placeholder=str(num),
+                    )
+                else:
+                    # 일반 텍스트 segment
+                    if seg:
+                        # 공백 유지용: &nbsp;로 바꾸고 unsafe_allow_html 사용
+                        safe_html = seg.replace(" ", "&nbsp;")
+                        cols[i].markdown(f"<span>{safe_html}</span>", unsafe_allow_html=True)
 
-            # 문단 간 구분선(선택 사항)
-            st.markdown("---")
+            # 문단 간 간격
+            st.write("")
 
         # 전체 채점 버튼
         if st.button("✅ 채점하기"):
             correct_count, total, results = grade_answers(answer_map)
-            if total > 0:
-                score_pct = (correct_count / total) * 100
-            else:
-                score_pct = 0.0
+            score_pct = (correct_count / total) * 100 if total > 0 else 0.0
 
             st.subheader("📊 채점 결과")
             st.write(f"총 {total}문항 중 **{correct_count}개** 정답입니다.")
             st.write(f"점수: **{score_pct:.1f}점 / 100점**")
 
-            # 문항별 피드백
             for r in results:
                 num = r["num"]
                 correct = r["correct"]
