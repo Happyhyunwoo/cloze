@@ -4,7 +4,6 @@ import nltk
 from nltk import pos_tag, word_tokenize
 import random
 import re
-import os
 
 # ---------- NLTK data ----------
 # 1) 문장/단어 토크나이저: punkt + punkt_tab
@@ -54,6 +53,7 @@ def assemble_tokens(tokens):
         if i == 0:
             out += t
             continue
+        # 문장부호면 앞에 공백 없이
         if re.fullmatch(r"[^\w\s]", t):
             out += t
         else:
@@ -81,6 +81,7 @@ def generate_questions_from_docx(file_like, pos_choice, blank_ratio_fraction):
         try:
             tagged = pos_tag(tokens)
         except Exception:
+            # 태깅에 실패하면 전부 명사 취급
             tagged = [(t, "NN") for t in tokens]
 
         candidate_indices = []
@@ -92,6 +93,7 @@ def generate_questions_from_docx(file_like, pos_choice, blank_ratio_fraction):
                     if tg in POS_GROUPS.get(pos_choice, set()):
                         candidate_indices.append(i)
 
+        # 후보가 하나도 없으면 "단어 비슷한 것"은 다 후보로
         if not candidate_indices:
             candidate_indices = [
                 i for i, (tok, tg) in enumerate(tagged) if is_candidate_token(tok)
@@ -157,7 +159,7 @@ st.set_page_config(page_title="Blank Test Web Quiz", layout="wide")
 st.title("📘 Blank Test Web Quiz")
 st.markdown(
     "업로드한 Word(.docx)에서 특정 품사만 선택하여 랜덤으로 빈칸을 생성하고, "
-    "웹페이지에서 바로 풀고 자동 채점할 수 있는 시험지를 만듭니다."
+    "웹페이지에서 **문제지의 빈칸에 바로 답을 입력**하고 자동 채점할 수 있습니다."
 )
 
 # 상단 정보란 (반, 이름 등)
@@ -179,7 +181,7 @@ uploaded_file = st.file_uploader("Word(.docx) 파일 업로드", type=["docx"])
 if st.button("🧹 초기화(새로 시작하기)"):
     for key in list(st.session_state.keys()):
         del st.session_state[key]
-    st.rerun()
+    st.experimental_rerun()
 
 # 문제 생성 버튼
 if uploaded_file is not None:
@@ -191,7 +193,7 @@ if uploaded_file is not None:
             )
             st.session_state["questions"] = questions
             st.session_state["answer_map"] = answer_map
-            st.success("문제가 생성되었습니다. 아래에서 바로 풀어보세요!")
+            st.success("문제가 생성되었습니다. 아래 문제지에서 바로 풀어보세요!")
         except Exception as e:
             st.error("문제 생성 중 오류가 발생했습니다.")
             st.exception(e)
@@ -200,7 +202,7 @@ else:
 
 st.markdown("---")
 
-# 생성된 문제가 있으면 화면에 출력 + 답 입력
+# 생성된 문제가 있으면 화면에 출력 + 해당 문단 바로 아래에서 답 입력
 if "questions" in st.session_state and "answer_map" in st.session_state:
     questions = st.session_state["questions"]
     answer_map = st.session_state["answer_map"]
@@ -208,24 +210,33 @@ if "questions" in st.session_state and "answer_map" in st.session_state:
     if len(answer_map) == 0:
         st.warning("생성된 빈칸이 없습니다. 빈칸 비율을 올리거나 다른 품사/지문을 사용해 보세요.")
     else:
-        st.subheader("📝 문제지")
+        st.subheader("📝 문제지 (빈칸 바로 아래에 답을 입력하세요)")
 
+        # 각 문단을 순서대로 출력
         for para in questions:
             if para.strip() == "":
-                st.write("")
-            else:
-                st.write(para)
+                st.write("")  # 빈 줄
+                continue
 
-        st.markdown("---")
-        st.subheader("✏️ 답안 입력")
+            # 문단 텍스트(빈칸 포함)를 먼저 보여줌
+            st.markdown(para)
 
-        for num in sorted(answer_map.keys()):
-            st.text_input(
-                label=f"{num}번",
-                key=f"answer_{num}",
-                placeholder="정답을 입력하세요",
-            )
+            # 이 문단에 포함된 빈칸 번호들 찾기
+            blank_nums_in_para = re.findall(r"\((\d+)\)_+", para)
+            blank_nums_in_para = [int(x) for x in blank_nums_in_para]
 
+            # 문단 바로 아래에 해당 번호들의 답안 입력칸을 만들기
+            for num in sorted(blank_nums_in_para):
+                st.text_input(
+                    label=f"{num}번",
+                    key=f"answer_{num}",
+                    placeholder="정답을 입력하세요",
+                )
+
+            # 문단 간 구분선(선택 사항)
+            st.markdown("---")
+
+        # 전체 채점 버튼
         if st.button("✅ 채점하기"):
             correct_count, total, results = grade_answers(answer_map)
             if total > 0:
@@ -233,12 +244,11 @@ if "questions" in st.session_state and "answer_map" in st.session_state:
             else:
                 score_pct = 0.0
 
-            st.markdown("---")
             st.subheader("📊 채점 결과")
-
             st.write(f"총 {total}문항 중 **{correct_count}개** 정답입니다.")
             st.write(f"점수: **{score_pct:.1f}점 / 100점**")
 
+            # 문항별 피드백
             for r in results:
                 num = r["num"]
                 correct = r["correct"]
